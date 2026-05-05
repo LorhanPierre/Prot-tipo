@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lumina Spatial OS</title>
+<style>
+:root {
+  /* Tipografia estilo Apple (SF Pro) */
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+ 
+  /* Cores de Sistema (visionOS Dark Material) */
+  --c-glass-bg: rgba(30, 30, 35, 0.65);
+  --c-glass-bg-hover: rgba(45, 45, 50, 0.75);
+ 
+  /* A mágica do vidro da Apple: reflexo interno no topo + sombra suave e profunda */
+  --glass-edge: inset 0 1px 1px rgba(255, 255, 255, 0.25), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --glass-shadow: 0 32px 64px rgba(0, 0, 0, 0.5), 0 16px 32px rgba(0, 0, 0, 0.2);
+  --blur: blur(60px) saturate(220%);
+ 
+  /* Cores de Destaque */
+  --c-accent: #0A84FF; /* Blue */
+  --c-green:  #32D74B; /* Green */
+  --c-warn:   #FFD60A; /* Yellow */
+  --c-danger: #FF453A; /* Red */
+ 
+  /* Texto */
+  --text-primary: #FFFFFF;
+  --text-secondary: rgba(235, 235, 245, 0.6);
+  --text-tertiary: rgba(235, 235, 245, 0.3);
+}
+
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+
+html, body {
+  width: 100%; height: 100%; overflow: hidden;
+  background: #000;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+
+/* ── WORLD PASSTHROUGH (Visão da Câmera) ── */
+#world-passthrough {
+  position: fixed; inset: -5%; z-index: 0;
+  background: url('https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1920&q=80') center/cover;
+  filter: blur(8px) brightness(0.6); /* O VisionOS não escurece tanto o fundo, confia no desfoque */
+  pointer-events: none;
+}
+
+
+/* ── HUD SPATIAL (Ornaments) ── */
+/* No visionOS, elementos flutuantes são chamados de Ornaments e ficam presos às bordas das janelas */
+#hud-frame {
+  position: fixed; top: 40px; left: 50%; transform: translateX(-50%);
+  z-index: 400; pointer-events: none; display: flex; gap: 16px;
+}
+
+
+.hud-pill {
+  font-family: var(--font-ui);
+  font-size: 0.75rem; font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: rgba(20, 20, 20, 0.5);
+  padding: 8px 16px;
+  border-radius: 30px;
+  backdrop-filter: blur(30px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2), inset 0 1px 1px rgba(255,255,255,0.1);
+  display: flex; align-items: center; gap: 8px;
+}
+.hud-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-green); box-shadow: 0 0 8px var(--c-green); }
+
+
+/* ── SPATIAL GLASS PANELS ── */
+#scene {
+  position: fixed; inset: 0; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  gap: 24px; padding: 100px;
+}
+
+
+.ar-panel {
+  position: relative;
+  background: var(--c-glass-bg);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border-radius: 40px; /* Curvatura característica da Apple */
+  overflow: hidden;
+  box-shadow: var(--glass-shadow), var(--glass-edge);
+  transition: all 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+
+/* Estados de feedback suaves */
+.state-idle    { border: 1px solid transparent; }
+.state-active  { background: var(--c-glass-bg-hover); transform: scale(1.02); }
+.state-success { box-shadow: var(--glass-shadow), inset 0 1px 1px rgba(50, 215, 75, 0.4), inset 0 0 0 1px rgba(50, 215, 75, 0.2); }
+.state-warn    { box-shadow: var(--glass-shadow), inset 0 1px 1px rgba(255, 214, 10, 0.4), inset 0 0 0 1px rgba(255, 214, 10, 0.2); }
+.state-danger  { background: rgba(50, 15, 15, 0.65); box-shadow: var(--glass-shadow), inset 0 1px 1px rgba(255, 69, 58, 0.4), inset 0 0 0 1px rgba(255, 69, 58, 0.2); }
+
+
+/* ── LEFT: SESSION INFO ── */
+#panel-left {
+  width: 280px; flex-shrink: 0; align-self: center;
+  padding: 32px; min-height: 420px;
+  display: flex; flex-direction: column; gap: 0;
+}
+
+
+.panel-label {
+  font-size: 0.9rem; font-weight: 600;
+  color: var(--text-secondary); margin-bottom: 24px;
+}
+
+
+.info-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.info-row:last-of-type { border-bottom: none; }
+.info-key { font-size: 0.85rem; color: var(--text-secondary); font-weight: 400; }
+.info-val { font-size: 0.85rem; color: var(--text-primary); font-weight: 500; text-align: right; }
+
+
+.left-footer { margin-top: auto; padding-top: 20px; }
+
+
+#alert-box, #ok-box {
+  display: none; padding: 16px; border-radius: 20px;
+  animation: scaleIn 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+  background: rgba(0,0,0,0.2);
+}
+.alert-title, .ok-title { font-size: 0.8rem; font-weight: 600; margin-bottom: 4px; display: flex; gap: 8px; align-items: center; }
+.alert-title { color: var(--c-danger); }
+.ok-title { color: var(--c-green); }
+.alert-body, .ok-body { font-size: 0.75rem; color: var(--text-secondary); line-height: 1.5; }
+
+
+/* ── CENTER: MAIN INTERACTION ── */
+#panel-center {
+  flex: 1; max-width: 640px; align-self: center;
+  padding: 64px 56px; min-height: 480px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  text-align: center;
+}
+
+
+/* Optic ID / Gaze Reticle Style */
+#gaze-reticle {
+  width: 96px; height: 96px;
+  position: relative; margin-bottom: 32px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.03);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.1);
+}
+
+
+.reticle-ring {
+  position: absolute; inset: -4px; border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: rgba(255,255,255,0.8);
+  animation: spin-smooth 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  opacity: 0; transition: opacity 0.3s;
+}
+
+
+@keyframes spin-smooth {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+
+.ring-active .reticle-ring { opacity: 1; }
+.ring-success .reticle-ring { opacity: 1; border-top-color: var(--c-green); animation-play-state: paused; }
+.ring-warn .reticle-ring { opacity: 1; border-top-color: var(--c-warn); animation-play-state: paused; }
+
+
+.reticle-icon { font-size: 2.5rem; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.2)); }
+
+
+#main-title {
+  font-size: 2rem; font-weight: 600; letter-spacing: -0.01em;
+  color: var(--text-primary); margin-bottom: 12px;
+}
+#main-desc {
+  font-size: 1.05rem; color: var(--text-secondary); line-height: 1.5;
+  font-weight: 400; max-width: 80%;
+}
+
+
+/* Siri-style Waveform */
+#waveform {
+  display: none; gap: 4px; align-items: center;
+  height: 48px; margin-top: 32px;
+}
+.wv-bar {
+  width: 6px; border-radius: 6px; background: var(--text-primary);
+  animation: wv 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes wv { 0%,100%{transform:scaleY(.2); opacity:.5} 50%{transform:scaleY(1); opacity:1} }
+
+
+#voice-caption {
+  display: none; margin-top: 24px; padding: 20px 28px;
+  background: rgba(255,255,255,0.06); border-radius: 24px;
+  font-size: 1.1rem; color: var(--text-primary); font-style: italic;
+  font-weight: 400; box-shadow: inset 0 1px 1px rgba(255,255,255,0.1);
+}
+
+
+/* 2FA Token Input */
+#token-wrap {
+  display: none; flex-direction: column; align-items: center;
+  margin-top: 32px; gap: 16px; width: 80%;
+}
+.token-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+#token-input {
+  background: rgba(0,0,0,0.3); border: none;
+  border-radius: 20px; width: 100%;
+  color: var(--text-primary); font-family: var(--font-ui);
+  font-size: 2.5rem; font-weight: 600; letter-spacing: 24px;
+  text-align: center; padding: 20px 24px;
+  outline: none; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15), inset 0 4px 12px rgba(0,0,0,0.3);
+  transition: all 0.3s;
+}
+#token-input:focus { box-shadow: inset 0 0 0 2px var(--c-accent), inset 0 4px 12px rgba(0,0,0,0.3); }
+
+
+/* Data View (Confidential Data) */
+#data-view {
+  display: none; text-align: left; width: 100%;
+  margin-top: 8px; animation: scaleIn 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.data-header { font-size: 1.5rem; font-weight: 600; margin-bottom: 4px; }
+.data-sub { font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 32px; }
+.data-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 0; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 1rem;
+}
+.data-item:last-child { border-bottom: none; }
+.data-item-key { color: var(--text-secondary); }
+.data-item-val { font-weight: 500; }
+
+
+/* ── DOCK (Bottom Controls) ── */
+#dock {
+  position: fixed; bottom: 40px; left: 50%; transform: translateX(-50%);
+  z-index: 200; display: flex; flex-direction: column; gap: 20px; align-items: center;
+}
+
+
+#phase-track {
+  display: flex; gap: 12px;
+}
+.ph-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: rgba(255,255,255,0.2); transition: all 0.4s;
+}
+.ph-dot.done { background: var(--text-secondary); }
+.ph-dot.current { background: var(--text-primary); transform: scale(1.3); }
+
+
+/* Botões visionOS (Glassy, Pill-shaped) */
+.ar-btn {
+  font-family: var(--font-ui); font-weight: 600; font-size: 1rem;
+  padding: 16px 36px; border-radius: 40px; border: none; cursor: pointer; outline: none;
+  background: rgba(255,255,255,0.1); color: var(--text-primary);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2), inset 0 1px 1px rgba(255,255,255,0.2), inset 0 0 0 1px rgba(255,255,255,0.05);
+  transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.ar-btn:hover { background: rgba(255,255,255,0.18); transform: scale(1.02); }
+.ar-btn:active { transform: scale(0.98); }
+
+
+.ar-btn.primary {
+  background: var(--text-primary); color: #000;
+  box-shadow: 0 8px 24px rgba(255,255,255,0.15);
+}
+.ar-btn.primary:hover { background: #E5E5EA; }
+.ar-btn.btn-danger {
+  background: var(--c-danger); color: white;
+  box-shadow: 0 8px 24px rgba(255,69,58,0.3);
+}
+.ar-btn.btn-danger:hover { background: #FF5E55; }
+.ar-btn.disabled { opacity: 0.5; pointer-events: none; }
+
+
+/* ── ANIMATIONS ── */
+@keyframes scaleIn { from{opacity:0; transform:scale(0.95) translateY(10px)} to{opacity:1; transform:scale(1) translateY(0)} }
+
+
+</style>
+</head>
+<body>
+
+
+<div id="world-passthrough"></div>
+
+
+<div id="hud-frame">
+  <div class="hud-pill">
+    <div class="hud-dot"></div>
+    CORP PROD ENVIRONMENT
+  </div>
+  <div class="hud-pill">
+    <span id="hud-time">--:--</span>
+  </div>
+</div>
+
+
+<div id="scene">
+
+
+  <div class="ar-panel state-idle" id="panel-left">
+    <div class="panel-label">Detalhes da Sessão</div>
+
+
+    <div class="info-row">
+      <span class="info-key">Biometria</span>
+      <span class="info-val" id="val-bio" style="color:var(--text-tertiary)">Pendente</span>
+    </div>
+    <div class="info-row">
+      <span class="info-key">Autenticador</span>
+      <span class="info-val" id="val-mfa" style="color:var(--text-tertiary)">Pendente</span>
+    </div>
+    <div class="info-row">
+      <span class="info-key">Usuário</span>
+      <span class="info-val" id="val-id" style="color:var(--text-tertiary)">---</span>
+    </div>
+    <div class="info-row">
+      <span class="info-key">Permissão</span>
+      <span class="info-val" id="val-lvl" style="color:var(--text-tertiary)">---</span>
+    </div>
+
+
+    <div class="left-footer">
+      <div id="alert-box">
+        <div class="alert-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+          Acesso Negado
+        </div>
+        <div class="alert-body">Sua requisição foi bloqueada pelo sistema de políticas corporativas.</div>
+      </div>
+      <div id="ok-box">
+        <div class="ok-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          Conexão Segura
+        </div>
+        <div class="ok-body">Identidade validada com sucesso via Optic ID e MFA.</div>
+      </div>
+    </div>
+  </div>
+
+
+  <div class="ar-panel state-idle" id="panel-center">
+    <div id="gaze-reticle" class="ring-idle">
+      <div class="reticle-ring"></div>
+      <span class="reticle-icon" id="ring-icon">🔐</span>
+    </div>
+
+
+    <div id="main-title">Autenticação Necessária</div>
+    <div id="main-desc">
+      Inicie o processo de segurança para acessar seus aplicativos de trabalho em modo espacial.
+    </div>
+
+
+    <div id="waveform">
+      <div class="wv-bar" style="height:24px;animation-delay:0s"></div>
+      <div class="wv-bar" style="height:16px;animation-delay:.1s"></div>
+      <div class="wv-bar" style="height:36px;animation-delay:.2s"></div>
+      <div class="wv-bar" style="height:12px;animation-delay:.3s"></div>
+      <div class="wv-bar" style="height:30px;animation-delay:.4s"></div>
+      <div class="wv-bar" style="height:20px;animation-delay:.5s"></div>
+      <div class="wv-bar" style="height:38px;animation-delay:.6s"></div>
+    </div>
+
+
+    <div id="voice-caption"></div>
+
+
+    <div id="token-wrap">
+      <div class="token-label">Código de Autenticação</div>
+      <input type="text" id="token-input" maxlength="6" placeholder="------" autocomplete="off" inputmode="numeric">
+    </div>
+
+
+    <div id="data-view">
+      <div class="data-header">Relatório Q3 2026</div>
+      <div class="data-sub">Acesso Restrito (Somente Leitura)</div>
+      <div class="data-item">
+        <span class="data-item-key">Receita Bruta</span>
+        <span class="data-item-val">R$ 4.250.000,00</span>
+      </div>
+      <div class="data-item">
+        <span class="data-item-key">Margem de Lucro</span>
+        <span class="data-item-val">18,4%</span>
+      </div>
+      <div class="data-item">
+        <span class="data-item-key">Crescimento (YoY)</span>
+        <span class="data-item-val" style="color:var(--c-green)">+12,3%</span>
+      </div>
+      <div class="data-item">
+        <span class="data-item-key">Auditoria</span>
+        <span class="data-item-val" style="color:var(--c-green)">Validado</span>
+      </div>
+    </div>
+  </div>
+
+
+</div>
+
+
+<div id="dock">
+  <button class="ar-btn primary" id="btn-action" onclick="nextPhase()">
+    Iniciar Sessão
+  </button>
+  <div id="phase-track">
+    <div class="ph-dot current" id="dot0"></div>
+    <div class="ph-dot" id="dot1"></div>
+    <div class="ph-dot" id="dot2"></div>
+    <div class="ph-dot" id="dot3"></div>
+    <div class="ph-dot" id="dot4"></div>
+    <div class="ph-dot" id="dot5"></div>
+    <div class="ph-dot" id="dot6"></div>
+    <div class="ph-dot" id="dot7"></div>
+  </div>
+</div>
+
+
+<script>
+/* ── Atualizar Hora ── */
+function pad(n) { return String(n).padStart(2,'0'); }
+function updateTime() {
+  const d = new Date();
+  document.getElementById('hud-time').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+setInterval(updateTime, 1000); updateTime();
+
+
+/* ── Referências do DOM ── */
+const el = {
+  panelL:   document.getElementById('panel-left'),
+  panelC:   document.getElementById('panel-center'),
+  reticle:  document.getElementById('gaze-reticle'),
+  icon:     document.getElementById('ring-icon'),
+  title:    document.getElementById('main-title'),
+  desc:     document.getElementById('main-desc'),
+  waveform: document.getElementById('waveform'),
+  caption:  document.getElementById('voice-caption'),
+  tokenWrap:document.getElementById('token-wrap'),
+  tokenIn:  document.getElementById('token-input'),
+  dataView: document.getElementById('data-view'),
+  valBio:   document.getElementById('val-bio'),
+  valMfa:   document.getElementById('val-mfa'),
+  valId:    document.getElementById('val-id'),
+  valLvl:   document.getElementById('val-lvl'),
+  alertBox: document.getElementById('alert-box'),
+  okBox:    document.getElementById('ok-box'),
+  btn:      document.getElementById('btn-action'),
+};
+
+
+/* ── Funções Auxiliares ── */
+function panel(id, state) { document.getElementById(id).className = `ar-panel state-${state}`; }
+function ring(state, icon) {
+  el.reticle.className = `ring-${state}`;
+  if (icon) el.icon.textContent = icon;
+}
+function hide(...ids) { ids.forEach(id => { const e = document.getElementById(id); if(e) e.style.display='none'; }); }
+function show(id, disp='block') { const e = document.getElementById(id); if(e) e.style.display=disp; }
+
+
+function resetCenter() {
+  hide('waveform','voice-caption','token-wrap','data-view');
+  el.title.style.display = 'block';
+  el.desc.style.display  = 'block';
+  el.reticle.style.display = 'flex';
+}
+
+
+function updateDots(cur) {
+  for (let i=0; i<8; i++) {
+    const d = document.getElementById(`dot${i}`);
+    if (!d) continue;
+    d.className = i < cur ? 'ph-dot done' : i === cur ? 'ph-dot current' : 'ph-dot';
+  }
+}
+
+
+/* ── Fases da Demonstração ── */
+let phase = 0;
+
+
+const phases = [
+  /* 0 → Biometria (Optic ID) */
+  () => {
+    resetCenter();
+    panel('panel-center','active');
+    ring('active','👁️');
+    el.title.textContent = 'Optic ID Necessário';
+    el.desc.textContent  = 'Olhe para a câmera frontal para confirmar sua identidade.';
+    el.btn.textContent = 'Confirmar Leitura';
+    el.btn.className = 'ar-btn';
+  },
+
+
+  /* 1 → 2FA */
+  () => {
+    el.valBio.textContent = 'Validado'; el.valBio.style.color = 'var(--text-primary)';
+    resetCenter();
+    panel('panel-center','active');
+    ring('idle','📱');
+    el.title.textContent = 'Verificação em Duas Etapas';
+    el.desc.textContent  = 'Digite o código gerado no seu dispositivo de segurança.';
+    show('token-wrap','flex');
+    el.tokenIn.value = ''; el.tokenIn.focus();
+    el.btn.textContent = 'Verificar Código';
+    el.btn.className = 'ar-btn primary';
+  },
+
+
+  /* 2 → Conclusão Login */
+  () => {
+    if (el.tokenIn.value.length < 6) {
+      panel('panel-center','warn'); ring('warn','⚠️');
+      el.desc.textContent = 'Código incompleto. Digite os 6 dígitos numéricos.';
+      phase--; return;
+    }
+    el.valMfa.textContent = 'Validado'; el.valMfa.style.color = 'var(--text-primary)';
+    el.valId.textContent  = 'J. Appleseed'; el.valId.style.color  = 'var(--text-primary)';
+    resetCenter();
+    panel('panel-center','success');
+    ring('success','✓');
+    el.title.textContent = 'Bem-vindo(a)';
+    el.desc.textContent  = 'Seu espaço de trabalho seguro está pronto.';
+    show('ok-box');
+    el.btn.textContent = 'Usar Controle de Voz';
+    el.btn.className = 'ar-btn';
+  },
+
+
+  /* 3 → Controle de Voz Escutando */
+  () => {
+    resetCenter();
+    panel('panel-center','active');
+    ring('active','🎙️');
+    el.title.textContent = 'Ouvindo...';
+    el.desc.style.display = 'none';
+    show('waveform','flex');
+    show('voice-caption');
+    el.caption.textContent = "“Mostrar o relatório financeiro deste trimestre.”";
+    el.btn.textContent = 'Processar Comando';
+    el.btn.className = 'ar-btn primary';
+  },
+
+
+  /* 4 → Análise ABAC (Autorização) */
+  () => {
+    resetCenter();
+    panel('panel-center','idle');
+    ring('idle','🛡️');
+    el.title.textContent = 'Avaliando Permissões';
+    el.desc.textContent  = 'Consultando diretórios de acesso (ABAC)...';
+    el.btn.textContent   = 'Analisando...';
+    el.btn.classList.add('disabled');
+    setTimeout(() => {
+      el.valLvl.textContent = 'Nível 4 (Gerente)'; el.valLvl.style.color = 'var(--c-green)';
+      panel('panel-center','success');
+      ring('success','✓');
+      el.title.textContent = 'Acesso Concedido';
+      el.desc.textContent  = 'Carregando interface holográfica do relatório...';
+      el.btn.textContent   = 'Abrir Relatório';
+      el.btn.classList.remove('disabled');
+    }, 2000);
+  },
+
+
+  /* 5 → Relatório Exibido */
+  () => {
+    panel('panel-center','idle');
+    el.reticle.style.display = 'none';
+    el.title.style.display   = 'none';
+    el.desc.style.display    = 'none';
+    hide('waveform','voice-caption','token-wrap');
+    show('data-view');
+    el.btn.textContent = 'Testar Comando Bloqueado';
+    el.btn.className = 'ar-btn';
+  },
+
+
+  /* 6 → Comando Crítico Escutando */
+  () => {
+    el.reticle.style.display = 'flex';
+    el.title.style.display   = 'block';
+    el.desc.style.display    = 'none';
+    resetCenter();
+    panel('panel-center','active');
+    ring('active','🎙️');
+    el.title.textContent = 'Ouvindo...';
+    show('waveform','flex');
+    show('voice-caption');
+    el.caption.textContent = "“Baixar banco de dados completo de clientes.”";
+    el.btn.textContent = 'Processar Comando';
+    el.btn.className = 'ar-btn primary';
+  },
+
+
+  /* 7 → ABAC Bloqueio de Segurança */
+  () => {
+    resetCenter();
+    panel('panel-center','idle');
+    ring('idle','🛡️');
+    el.title.textContent = 'Avaliando Permissões';
+    el.desc.textContent  = 'Esta ação requer privilégios de Administrador (Nível 5).';
+    el.btn.textContent   = 'Analisando...';
+    el.btn.classList.add('disabled');
+    setTimeout(() => {
+      panel('panel-center','danger'); panel('panel-left','danger');
+      ring('warn','✕');
+      el.title.textContent = 'Ação Restrita';
+      el.desc.innerHTML    = 'Você não tem permissão para realizar exportações em massa. O incidente foi registrado.';
+      show('alert-box'); el.okBox.style.display = 'none';
+      el.btn.textContent = 'Encerrar Sessão';
+      el.btn.className   = 'ar-btn btn-danger';
+      el.btn.classList.remove('disabled');
+    }, 2500);
+  }
+];
+
+
+function nextPhase() {
+  if (phase >= 8) { location.reload(); return; }
+  updateDots(phase + 1);
+  phases[phase]();
+  phase++;
+}
+
+
+/* Comportamento do Input numérico */
+el.tokenIn.addEventListener('input', function() {
+  this.value = this.value.replace(/[^0-9]/g,'');
+  if(this.value.length === 6) {
+    el.btn.click(); // Auto-submit quando tiver 6 dígitos
+  }
+});
+</script>
+</body>
+</html>
+
